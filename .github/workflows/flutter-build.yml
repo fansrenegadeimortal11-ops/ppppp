@@ -28,14 +28,17 @@ jobs:
           ls -la project
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: 3.27.4
-          channel: any
+          channel: stable
       - name: Patch Gradle
         working-directory: project
         run: |
           if [ -f android/gradle.properties ]; then
             grep -q "android.newDsl" android/gradle.properties || echo "android.newDsl=false" >> android/gradle.properties
             grep -q "android.suppressUnsupportedCompileSdk" android/gradle.properties || echo "android.suppressUnsupportedCompileSdk=35,36" >> android/gradle.properties
+          fi
+          if [ -f android/gradle/wrapper/gradle-wrapper.properties ]; then
+            sed -i "s|distributionUrl=.*|distributionUrl=https\\://services.gradle.org/distributions/gradle-8.14-all.zip|" android/gradle/wrapper/gradle-wrapper.properties
+            grep distributionUrl android/gradle/wrapper/gradle-wrapper.properties
           fi
       - name: Build APK
         working-directory: project
