@@ -28,7 +28,8 @@ jobs:
           ls -la project
       - uses: subosito/flutter-action@v2
         with:
-          channel: stable
+          flutter-version: 3.27.4
+          channel: any
       - name: Build APK
         working-directory: project
         run: |
