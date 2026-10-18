@@ -1,0 +1,35 @@
+name: Flutter Build
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'debug/release'
+        required: true
+        default: 'debug'
+      zip_url:
+        description: 'zip url'
+        required: true
+      app_name:
+        description: 'app name'
+        required: false
+        default: 'app'
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download project
+        run: |
+          curl -L "$ZIP_URL" -o project.zip
+          unzip -q project.zip -d project
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Build APK
+        working-directory: project
+        run: |
+          flutter pub get
+          flutter build apk --$BUILD_MODE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-apk
+          path: project/build/app/outputs/flutter-apk/*.apk
