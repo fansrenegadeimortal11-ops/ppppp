@@ -28,29 +28,66 @@ jobs:
           ls -la project
       - uses: subosito/flutter-action@v2
         with:
-          channel: stable
-      - name: Patch Gradle
+          flutter-version: 3.27.4
+          channel: any
+      - name: Auto-fix common errors
         working-directory: project
         run: |
+          # 1) inject 'config.dart' import for undefined kApi
+          for f in $(grep -rl 'kApi' lib --include='*.dart' 2>/dev/null); do
+            if ! grep -q "import.*config.dart" "$f"; then
+              d=$(dirname "$f")
+              if [ -f "$d/config.dart" ]; then sed -i "1i import 'config.dart';" "$f"
+              elif [ -f lib/core/config.dart ]; then sed -i "1i import '../core/config.dart';" "$f" 2>/dev/null || sed -i "1i import 'package:zyynime/core/config.dart';" "$f"; fi
+              echo "[autofix] injected config import: $f"
+            fi
+          done
+          # 2) adaptive icon drawable->mipmap fix
+          for x in android/app/src/main/res/mipmap-anydpi-v26/*.xml; do
+            [ -f "$x" ] && sed -i 's|@drawable/ic_launcher_foreground|@mipmap/ic_launcher_foreground|; s|@drawable/ic_launcher_background|@mipmap/ic_launcher_background|' "$x" && echo "[autofix] icon fixed: $x"
+          done
+          # 3) create missing drawable foreground if referenced
+          grep -rl "ic_launcher_foreground" android/app/src/main/res/ 2>/dev/null | while read x; do
+            if grep -q "@drawable/ic_launcher_foreground" "$x" && [ ! -f android/app/src/main/res/drawable/ic_launcher_foreground.xml ]; then
+              mkdir -p android/app/src/main/res/drawable
+              cat > android/app/src/main/res/drawable/ic_launcher_foreground.xml << 'XML'
+              <vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108"><path android:fillColor="#FFFFFF" android:pathData="M54,54m-30,0a30,30 0,1,1 60,0a30,30 0,1,1 -60,0"/></vector>
+              XML
+              echo "[autofix] created dummy ic_launcher_foreground"
+            fi
+          done
+          # 4) gradle newDsl / compileSdk suppress
           if [ -f android/gradle.properties ]; then
             grep -q "android.newDsl" android/gradle.properties || echo "android.newDsl=false" >> android/gradle.properties
             grep -q "android.suppressUnsupportedCompileSdk" android/gradle.properties || echo "android.suppressUnsupportedCompileSdk=35,36" >> android/gradle.properties
           fi
-          if [ -f android/gradle/wrapper/gradle-wrapper.properties ]; then
-            sed -i 's|distributionUrl=.*|distributionUrl=https\://services.gradle.org/distributions/gradle-8.14-all.zip|' android/gradle/wrapper/gradle-wrapper.properties
-            sed -i 's/id "com.android.application" version "[^"]*"/id "com.android.application" version "8.11.1"/' android/settings.gradle
-            sed -i 's/id "org.jetbrains.kotlin.android" version "[^"]*"/id "org.jetbrains.kotlin.android" version "2.2.20"/' android/settings.gradle
-            sed -i 's/id "org.jetbrains.kotlin.android" version "[^"]*"/id "org.jetbrains.kotlin.android" version "2.2.20"/' android/build.gradle || true
-            sed -i 's/id "com.android.application" version "[^"]*"/id "com.android.application" version "8.11.1"/' android/build.gradle || true
-          fi
       - name: Build APK
+        id: build
         working-directory: project
         run: |
           flutter pub get
           MODE="${{ github.event.client_payload.mode }}"
           if [ -z "$MODE" ]; then MODE=release; fi
           flutter build apk --$MODE
+      - name: Retry build on failure
+        if: failure()
+        working-directory: project
+        run: |
+          # analyze then try quick auto-fixes based on analyzer output, then rebuild
+          flutter analyze --no-pub 2>&1 | tee /tmp/analyzer.log || true
+          for f in $(grep -oP "lib/\S+\.dart(?=:\d+:\d+: Error: Undefined name 'kApi')" /tmp/analyzer.log | sort -u); do
+            if ! grep -q "import.*config.dart" "$f"; then
+              d=$(dirname "$f")
+              if [ -f "$d/config.dart" ]; then sed -i "1i import 'config.dart';" "$f"
+              elif [ -f lib/core/config.dart ]; then sed -i "1i import '../core/config.dart';" "$f"; fi
+              echo "[retry-autofix] injected config import: $f"
+            fi
+          done
+          MODE="${{ github.event.client_payload.mode }}"
+          if [ -z "$MODE" ]; then MODE=release; fi
+          flutter build apk --$MODE
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: apk-build
           path: project/build/app/outputs/flutter-apk/*.apk
