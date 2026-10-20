@@ -73,6 +73,10 @@ jobs:
         if: failure()
         working-directory: project
         run: |
+          # locate flutter (flutter-action path not on PATH in retry step)
+          FLUT=$(find "$HOME" -maxdepth 5 -name flutter -type f -path "*bin*" 2>/dev/null | head -1)
+          [ -n "$FLUT" ] && export PATH="$(dirname "$FLUT"):$PATH"
+          echo "flutter at: $(command -v flutter)"
           # analyze then try quick auto-fixes based on analyzer output, then rebuild
           flutter analyze --no-pub 2>&1 | tee /tmp/analyzer.log || true
           for f in $(grep -oP "lib/\S+\.dart(?=:\d+:\d+: Error: Undefined name 'kApi')" /tmp/analyzer.log | sort -u); do
